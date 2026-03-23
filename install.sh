@@ -2,115 +2,166 @@
 set -euo pipefail
 
 # oh-my-stalab-pro-max installer
-# Copies pipeline-specific .claude/ files into the target project
+# Global install to ~/.claude/ — file-level merge, never overwrites custom files
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="${1:-.}"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLAUDE_DIR="${HOME}/.claude"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  oh-my-stalab-pro-max installer"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Check prerequisites
+# 1. Check prerequisites
 echo "[1/4] Checking prerequisites..."
 
 # Check oh-my-stalab Harness (global)
 MISSING_AGENTS=()
 for agent in code-architect tdd-guide code-reviewer build-error-resolver code-simplifier; do
-  if [ ! -f "$HOME/.claude/agents/$agent.md" ]; then
+  if [ ! -f "$CLAUDE_DIR/agents/$agent.md" ]; then
     MISSING_AGENTS+=("$agent")
   fi
 done
 
 if [ ${#MISSING_AGENTS[@]} -gt 0 ]; then
-  echo "WARNING: oh-my-stalab Harness agents not found in ~/.claude/agents/:"
-  for a in "${MISSING_AGENTS[@]}"; do echo "  - $a.md"; done
   echo ""
-  echo "oh-my-stalab-pro-max requires oh-my-stalab Harness installed globally."
-  echo "Install it first, then re-run this script."
+  echo "  ERROR: oh-my-stalab-harness not installed."
+  echo "  Missing agents: ${MISSING_AGENTS[*]}"
   echo ""
-  read -p "Continue anyway? (y/N) " -n 1 -r
+  echo "  Install harness first:"
+  echo "    git clone https://github.com/ThingsLikeClaude/oh-my-stalab-harness.git"
+  echo "    cd oh-my-stalab-harness && bash install.sh"
+  echo ""
+  read -p "  Continue anyway? (y/N) " -n 1 -r
   echo ""
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
   fi
+else
+  echo "  oh-my-stalab-harness: OK"
 fi
 
 # Check bkit plugin
-if [ -d "$HOME/.claude/plugins/marketplaces/bkit-marketplace" ]; then
+if [ -d "$CLAUDE_DIR/plugins/marketplaces/bkit-marketplace" ] || [ -d "$HOME/.bkit" ]; then
   echo "  bkit plugin: OK"
-elif [ -d "$HOME/.bkit" ]; then
-  echo "  bkit plugin: OK (detected via .bkit/)"
 else
-  echo "WARNING: bkit plugin not detected."
-  echo "Install with: claude plugin add bkit"
-  echo "Or visit: https://github.com/popup-studio-ai/bkit-claude-code"
   echo ""
-  read -p "Continue anyway? (y/N) " -n 1 -r
+  echo "  WARNING: bkit plugin not detected."
+  echo "  Install: claude plugin add bkit"
+  echo "  Or: https://github.com/popup-studio-ai/bkit-claude-code"
+  echo ""
+  read -p "  Continue anyway? (y/N) " -n 1 -r
   echo ""
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
   fi
 fi
 
-# Create target directories
-echo "[2/4] Creating directories..."
-mkdir -p "$TARGET_DIR/.claude/agents"
-mkdir -p "$TARGET_DIR/.claude/commands"
-mkdir -p "$TARGET_DIR/.claude/rules"
-
-# Link or copy files
-echo "[3/4] Installing oh-my-stalab-pro-max files..."
-
+# 2. Detect OS
 IS_WINDOWS=false
-if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]] || [[ -n "${WSLENV:-}" ]]; then
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]]; then
   IS_WINDOWS=true
 fi
 
-link_or_copy() {
+# 3. File-level merge into ~/.claude/
+echo ""
+echo "[2/4] Installing to $CLAUDE_DIR (file-level merge)..."
+
+INSTALLED=0
+SKIPPED=0
+CONFLICTS=()
+
+install_file() {
   local src="$1" dst="$2"
+
+  mkdir -p "$(dirname "$dst")"
+
+  if [ ! -e "$dst" ]; then
+    if [ "$IS_WINDOWS" = true ]; then
+      cp "$src" "$dst"
+    else
+      ln -sf "$src" "$dst"
+    fi
+    INSTALLED=$((INSTALLED + 1))
+    return
+  fi
+
+  # File exists — compare hashes
+  local src_hash dst_hash
+  src_hash=$(sha256sum "$src" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$src" | cut -d' ' -f1)
+  dst_hash=$(sha256sum "$dst" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$dst" | cut -d' ' -f1)
+
+  if [ "$src_hash" = "$dst_hash" ]; then
+    SKIPPED=$((SKIPPED + 1))
+    return
+  fi
+
+  # Conflict — backup then install
+  local rel_path="${dst#$CLAUDE_DIR/}"
+  CONFLICTS+=("$rel_path")
+  cp "$dst" "$dst.backup-$(date +%Y%m%d-%H%M%S)"
+
   if [ "$IS_WINDOWS" = true ]; then
     cp "$src" "$dst"
   else
     ln -sf "$src" "$dst"
   fi
+  INSTALLED=$((INSTALLED + 1))
 }
 
-link_or_copy "$SCRIPT_DIR/agents/pm-agent.md" "$TARGET_DIR/.claude/agents/pm-agent.md"
-link_or_copy "$SCRIPT_DIR/agents/test-designer.md" "$TARGET_DIR/.claude/agents/test-designer.md"
-link_or_copy "$SCRIPT_DIR/agents/verification-orchestrator.md" "$TARGET_DIR/.claude/agents/verification-orchestrator.md"
-link_or_copy "$SCRIPT_DIR/commands/oms-pro-max.md" "$TARGET_DIR/.claude/commands/oms-pro-max.md"
-link_or_copy "$SCRIPT_DIR/rules/response-language.md" "$TARGET_DIR/.claude/rules/response-language.md"
+# Install agents
+for f in "$REPO_DIR"/agents/*.md; do
+  [ -f "$f" ] || continue
+  install_file "$f" "$CLAUDE_DIR/agents/$(basename "$f")"
+done
 
-# Handle CLAUDE.md
-echo "[4/4] Setting up CLAUDE.md..."
-if [ -f "$TARGET_DIR/CLAUDE.md" ]; then
-  echo "  CLAUDE.md already exists. Appending oh-my-stalab-pro-max rules..."
-  echo "" >> "$TARGET_DIR/CLAUDE.md"
-  echo "# --- oh-my-stalab-pro-max rules (auto-appended) ---" >> "$TARGET_DIR/CLAUDE.md"
-  echo "" >> "$TARGET_DIR/CLAUDE.md"
-  cat "$SCRIPT_DIR/CLAUDE.md" >> "$TARGET_DIR/CLAUDE.md"
-  echo "  Appended to existing CLAUDE.md. Review and deduplicate if needed."
-else
-  cp "$SCRIPT_DIR/CLAUDE.md" "$TARGET_DIR/CLAUDE.md"
-  echo "  Created CLAUDE.md"
+# Install commands
+for f in "$REPO_DIR"/commands/*.md; do
+  [ -f "$f" ] || continue
+  install_file "$f" "$CLAUDE_DIR/commands/$(basename "$f")"
+done
+
+# Install rules
+for f in "$REPO_DIR"/rules/*.md; do
+  [ -f "$f" ] || continue
+  install_file "$f" "$CLAUDE_DIR/rules/$(basename "$f")"
+done
+
+echo "  Installed: $INSTALLED files"
+echo "  Skipped (identical): $SKIPPED files"
+
+if [ ${#CONFLICTS[@]} -gt 0 ]; then
+  echo ""
+  echo "  CONFLICTS (originals backed up with .backup-* suffix):"
+  for c in "${CONFLICTS[@]}"; do
+    echo "    ~/.claude/$c"
+  done
 fi
 
+# 4. Summary
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "[3/4] Installed components:"
+echo "  ~/.claude/agents/pm-agent.md"
+echo "  ~/.claude/agents/test-designer.md"
+echo "  ~/.claude/agents/verification-orchestrator.md"
+echo "  ~/.claude/commands/oms-pro-max.md"
+echo "  ~/.claude/rules/response-language.md"
+
+echo ""
+echo "[4/4] Note: CLAUDE.md is NOT auto-installed globally."
+echo "  Pro-max pipeline rules live in the command itself."
+echo "  .pipeline/ is created per-project when you run /oms-pro-max."
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Installation complete!"
 echo ""
-echo "  Installed to: $TARGET_DIR"
+echo "  Installed: $INSTALLED | Skipped: $SKIPPED | Conflicts: ${#CONFLICTS[@]}"
 echo ""
-echo "  Files:"
-echo "    .claude/agents/pm-agent.md"
-echo "    .claude/agents/test-designer.md"
-echo "    .claude/agents/verification-orchestrator.md"
-echo "    .claude/commands/oms-pro-max.md"
-echo "    .claude/rules/response-language.md"
-echo "    CLAUDE.md"
-echo ""
-echo "  Usage:"
+echo "  Usage (in any project):"
 echo "    /oms-pro-max \"feature description\""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+if [ "$IS_WINDOWS" = false ]; then
+  echo "  Update: git pull (symlinks auto-reflect)"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

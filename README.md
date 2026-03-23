@@ -27,18 +27,25 @@ Layer 3: bkit plugin (PDCA 자동화)
 
 ## 설치
 
-### 자동 설치
+### 전제조건 (먼저 설치)
 ```bash
-cd your-project/
-bash /path/to/oh-my-stalab-pro-max/install.sh
+# 1. oh-my-stalab-harness (글로벌 베이스)
+git clone https://github.com/ThingsLikeClaude/oh-my-stalab-harness.git
+cd oh-my-stalab-harness && bash install.sh
+
+# 2. bkit plugin
+claude plugin add bkit
 ```
 
-### 수동 설치
+### pro-max 설치 (글로벌)
 ```bash
-cd your-project/
-cp -r /path/to/oh-my-stalab-pro-max/.claude/ .claude/
-cp /path/to/oh-my-stalab-pro-max/CLAUDE.md CLAUDE.md  # 기존 CLAUDE.md가 있으면 내용 병합
+git clone https://github.com/ThingsLikeClaude/oh-my-stalab-pro-max.git
+cd oh-my-stalab-pro-max
+bash install.sh
 ```
+
+`~/.claude/`에 글로벌 설치됩니다. 모든 프로젝트에서 `/oms-pro-max` 사용 가능.
+`.pipeline/`은 실행한 프로젝트 디렉토리에 자동 생성됩니다.
 
 ## 사용법
 
