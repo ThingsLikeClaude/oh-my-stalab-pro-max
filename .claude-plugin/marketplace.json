@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "oh-my-stalab-pro-max",
+  "plugins": [
+    {
+      "name": "oh-my-stalab-pro-max",
+      "source": ".",
+      "category": "development",
+      "tags": ["pipeline", "autonomous", "tdd", "ralph-loop", "pdca", "agents"]
+    }
+  ]
+}

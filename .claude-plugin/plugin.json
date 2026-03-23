@@ -1,0 +1,10 @@
+{
+  "name": "oh-my-stalab-pro-max",
+  "version": "1.0.0",
+  "description": "Autonomous full-cycle development pipeline with Ralph loop (requires oh-my-stalab-harness + bkit)",
+  "repository": "https://github.com/stalab-ai/oh-my-stalab-pro-max",
+  "dependencies": ["oh-my-stalab-harness", "bkit"],
+  "agents": "agents/",
+  "commands": "commands/",
+  "rules": "rules/"
+}
